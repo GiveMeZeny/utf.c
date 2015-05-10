@@ -555,7 +555,7 @@ size_t utflen(const char *str)
 
 	for (len = 0; (n = chartorune(&rune, str)); str += n, len++)
 		if (!rune)
-			break
+			break;
 	return len;
 }
 
@@ -567,7 +567,7 @@ size_t utfnlen(const char *str, size_t maxlen)
 
 	for (len = 0; (n = charntorune(&rune, str, maxlen)); len++) {
 		if (!rune)
-			break
+			break;
 		str += n;
 		maxlen -= n;
 	}
