@@ -21,11 +21,13 @@ union utf32 {
 	unsigned char *b;   /* byte buffer */
 };
 
-char *BOM_UTF8 = "\xEF\xBB\xBF";
-char *BOM_UTF16_BE = "\xFE\xFF";
-char *BOM_UTF16_LE = "\xFF\xFE";
-char *BOM_UTF32_BE = "\x00\x00\xFE\xFF";
-char *BOM_UTF32_LE = "\xFF\xFE\x00\x00";
+Rune Runeerror = 0xfffd;
+
+const char *const BOM_UTF8 = "\xef\xbb\xbf";
+const char *const BOM_UTF16_BE = "\xfe\xff";
+const char *const BOM_UTF16_LE = "\xff\xfe";
+const char *const BOM_UTF32_BE = "\x00\x00\xfe\xff";
+const char *const BOM_UTF32_LE = "\xff\xfe\x00\x00";
 
 /* return 1 if it's just ascii */
 #define UTF8_IS_ASCII(c) (((unsigned char)(c) & 0x80) != 0x80)
@@ -132,25 +134,27 @@ static inline int utf8_trail_cnt(unsigned char c)
 		return retval - 1;                                        \
 	} while (0)
 
-/* helper macro for converting from/to utf8-strings */
+/* helper macro for converting from/to utf-8 */
 #define CONVSTRN(str, len, strlen, factor, ret, totype, from, to) \
 	CONVSTR_(str, len, strlen, factor, ret, totype,           \
 		 (from(&c, str, n)), (to(dest, &c)))
 
+/* helper macro for converting from utf-32 to utf-8 */
 #define CONVSTR(str, len, strlen, factor, ret, totype, from, to) \
 	CONVSTR_(str, len, strlen, factor, ret, totype,          \
 		 (from(&c, str)), (to(dest, &c)))
 
-/* helper macro for converting from le/be-strings to utf8-strings */
+/* helper macro for converting from utf-16 le/be to utf-8 */
 #define CONVSTRNFROMXE(str, len, strlen, factor, ret, totype, from, to, be) \
 	CONVSTR_(str, len, strlen, factor, ret, totype,                     \
 		 (from(&c, str, n, be)), (to(dest, &c)))
 
+/* helper macro for converting from utf-32 le/be to utf-8 */
 #define CONVSTRFROMXE(str, len, strlen, factor, ret, totype, from, to, be) \
 	CONVSTR_(str, len, strlen, factor, ret, totype,                    \
 		 (from(&c, str, be)), (to(dest, &c)))
 
-/* helper macro for converting from utf8-strings to le/be-strings */
+/* helper macro for converting from utf-8 to utf-16/-32 le/be */
 #define CONVSTRNTOXE(str, len, strlen, factor, ret, totype, from, to, be) \
 	CONVSTR_(str, len, strlen, factor, ret, totype,                   \
 		 (from(&c, str, n)), (to(dest, &c, be)))
@@ -387,7 +391,8 @@ int validrune(Rune rune)
 {
 	if (rune > Runemax || (rune & 0xf800) == 0xd800)
 		return 0;
-	return 1;
+	else
+		return 1;
 }
 
 char *runeindex(const char *str, Rune rune)
@@ -397,6 +402,13 @@ char *runeindex(const char *str, Rune rune)
 
 	if (rune < Runeself)
 		return strchr(str, rune);
+	if (rune != Runeerror) {
+		char tmp[UTFmax + 1];
+		int n = runetochar(tmp, &rune);
+
+		tmp[n] = '\0';
+		return strstr(str, tmp);
+	}
 	do {
 		int n = chartorune(&c, u.pc);
 
@@ -495,23 +507,19 @@ int u32xetostr(char **ret, const char32_t *str, int len, int be)
 		      char32xetorune, runetochar, be);
 }
 
-char *validbom(const void *str, int len)
+const char *validbom(const void *str, int len)
 {
-	union {
-		const char *cp;
-		const char16_t *cp16;
-		const char32_t *cp32;
-	} u = {.cp = str};
+	const char *ptr = str;
 
-	if ((len >= 3 || len < 0) && !strncmp(u.cp, BOM_UTF8, 3))
+	if ((len >= 3 || len < 0) && !strncmp(ptr, BOM_UTF8, 3))
 		return BOM_UTF8;
-	else if ((len >= 2 || len < 0) && !strncmp(u.cp, BOM_UTF16_BE, 2))
+	else if ((len >= 2 || len < 0) && !strncmp(ptr, BOM_UTF16_BE, 2))
 		return BOM_UTF16_BE;
-	else if ((len >= 2 || len < 0) && !strncmp(u.cp, BOM_UTF16_LE, 2))
+	else if ((len >= 2 || len < 0) && !strncmp(ptr, BOM_UTF16_LE, 2))
 		return BOM_UTF16_LE;
-	else if ((len >= 4 || len < 0) && !strncmp(u.cp, BOM_UTF32_BE, 4))
+	else if ((len >= 4 || len < 0) && !strncmp(ptr, BOM_UTF32_BE, 4))
 		return BOM_UTF32_BE;
-	else if ((len >= 4 || len < 0) && !strncmp(u.cp, BOM_UTF32_LE, 4))
+	else if ((len >= 4 || len < 0) && !strncmp(ptr, BOM_UTF32_LE, 4))
 		return BOM_UTF32_LE;
 	else
 		return NULL;
@@ -524,19 +532,46 @@ int bomtostr(char **ret, const void *str, int len)
 		const char16_t *cp16;
 		const char32_t *cp32;
 	} u = {.cp = str};
-	char *bom = validbom(u.cp, len);
+	const char *bom = validbom(u.cp, len);
 
 	if (bom == BOM_UTF16_BE)
-		return u16betostr(ret, u.cp16 + 1, (len > 0) ? len / 2 : len);
+		return u16betostr(ret, u.cp16 + 1, (len > 0) ? len / 2 : -1);
 	else if (bom == BOM_UTF16_LE)
-		return u16letostr(ret, u.cp16 + 1, (len > 0) ? len / 2 : len);
+		return u16letostr(ret, u.cp16 + 1, (len > 0) ? len / 2 : -1);
 	else if (bom == BOM_UTF32_BE)
-		return u32betostr(ret, u.cp32 + 1, (len > 0) ? len / 4 : len);
+		return u32betostr(ret, u.cp32 + 1, (len > 0) ? len / 4 : -1);
 	else if (bom == BOM_UTF32_LE)
-		return u32letostr(ret, u.cp32 + 1, (len > 0) ? len / 4 : len);
+		return u32letostr(ret, u.cp32 + 1, (len > 0) ? len / 4 : -1);
 	else if (bom == BOM_UTF8)
 		u.cp += 3;
 	CONVSTRN(u.cp, len, strlen, 2, ret, char, charntorune, runetochar);
+}
+
+size_t utflen(const char *str)
+{
+	size_t len;
+	Rune rune;
+	int n;
+
+	for (len = 0; (n = chartorune(&rune, str)); str += n, len++)
+		if (!rune)
+			break
+	return len;
+}
+
+size_t utfnlen(const char *str, size_t maxlen)
+{
+	size_t len;
+	Rune rune;
+	int n;
+
+	for (len = 0; (n = charntorune(&rune, str, maxlen)); len++) {
+		if (!rune)
+			break
+		str += n;
+		maxlen -= n;
+	}
+	return len;
 }
 
 size_t str16len(const char16_t *str)
