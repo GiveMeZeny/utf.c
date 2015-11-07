@@ -1,6 +1,5 @@
 #include <stdlib.h>
 #include <string.h>
-#include <wchar.h>
 #include "utf.h"
 
 union utf8 {
@@ -23,20 +22,18 @@ union utf32 {
 
 Rune Runeerror = 0xfffd;
 
-const char *const BOM_UTF8 = "\xef\xbb\xbf";
-const char *const BOM_UTF16_BE = "\xfe\xff";
-const char *const BOM_UTF16_LE = "\xff\xfe";
-const char *const BOM_UTF32_BE = "\x00\x00\xfe\xff";
-const char *const BOM_UTF32_LE = "\xff\xfe\x00\x00";
-
 /* return 1 if it's just ascii */
 #define UTF8_IS_ASCII(c) (((unsigned char)(c) & 0x80) != 0x80)
+
 /* return 1 if continuation bytes are introduced */
-static inline int UTF8_IS_LEADING(unsigned char c) {return c >> 7 & c >> 6;}
+static inline int UTF8_IS_LEADING(unsigned char c) { return c >> 7 & c >> 6; }
+
 /* return 1 if it's a continuation byte */
-static inline int UTF8_IS_TRAILING(unsigned char c) {return c >> 7 & ~c >> 6;}
+static inline int UTF8_IS_TRAILING(unsigned char c) { return c >> 7 & ~c >> 6; }
+
 /* return 1 if it's a high surrogate */
 #define UTF16_IS_LEADING(c) (((char16_t)(c) & 0xfc00) == 0xd800)
+
 /* return 1 if it's a low surrogate */
 #define UTF16_IS_TRAILING(c) (((char16_t)(c) & 0xfc00) == 0xdc00)
 
@@ -67,101 +64,9 @@ static inline int utf8_trail_cnt(unsigned char c)
 		return -1;
 }
 
-/* helper macro for runetochar16 */
-#define RUNETOCHAR16(str, c)                             \
-	do {                                             \
-		if (c <= 0xffff) {                       \
-			*str = c;                        \
-			return 1;                        \
-		}                                        \
-		c -= 0x10000;                            \
-		*str++ = (((c >> 10) & 0x3ff) | 0xd800); \
-		*str = ((c & 0x3ff) | 0xdc00);           \
-		return 2;                                \
-	} while (0)
-
-/* helper macro for runetochar32 */
-#define RUNETOCHAR32(str, c) \
-	do {                 \
-		*str = c;    \
-		return 1;    \
-	} while (0)
-
-/* helper macro for char16torune */
-#define CHAR16TORUNE(c, str)                                   \
-	do {                                                   \
-		char16_t tmp = c = *str++;                     \
-		if (UTF16_IS_LEADING(tmp)) {                   \
-			if (UTF16_IS_TRAILING((tmp = *str))) { \
-				c = (c & 0x3ff) << 10;         \
-				c |= (tmp & 0x3ff);            \
-				c += 0x10000;                  \
-				retval++;                      \
-			} else {                               \
-				c = Runeerror;                 \
-			}                                      \
-		}                                              \
-	} while (0)
-
-/* helper macro for char32torune */
-#define CHAR32TORUNE(c, str) c = *str
-
-/* helper macro for the helper macros below */
-#define CONVSTR_(str, len, strlen, factor, ret, totype, from, to)         \
-	do {                                                              \
-		int retval, skip, n = (len < 0) ? (int)strlen(str) : len; \
-		totype *buf, *dest;                                       \
-		Rune c;                                                   \
-		buf = malloc(n * factor + sizeof(*buf));                  \
-		if (!buf)                                                 \
-			return -1;                                        \
-		dest = buf;                                               \
-		do {                                                      \
-			skip = from;                                      \
-			if (!skip)                                        \
-				break;                                    \
-			str += skip;                                      \
-			dest += to;                                       \
-			n -= skip;                                        \
-		} while (c && n);                                         \
-		if (c) {                                                  \
-			c = 0;                                            \
-			dest += to;                                       \
-		}                                                         \
-		retval = dest - buf;                                      \
-		dest = realloc(buf, retval * sizeof(*buf));               \
-		*ret = dest ? dest : buf;                                 \
-		return retval - 1;                                        \
-	} while (0)
-
-/* helper macro for converting from/to utf-8 */
-#define CONVSTRN(str, len, strlen, factor, ret, totype, from, to) \
-	CONVSTR_(str, len, strlen, factor, ret, totype,           \
-		 (from(&c, str, n)), (to(dest, &c)))
-
-/* helper macro for converting from utf-32 to utf-8 */
-#define CONVSTR(str, len, strlen, factor, ret, totype, from, to) \
-	CONVSTR_(str, len, strlen, factor, ret, totype,          \
-		 (from(&c, str)), (to(dest, &c)))
-
-/* helper macro for converting from utf-16 le/be to utf-8 */
-#define CONVSTRNFROMXE(str, len, strlen, factor, ret, totype, from, to, be) \
-	CONVSTR_(str, len, strlen, factor, ret, totype,                     \
-		 (from(&c, str, n, be)), (to(dest, &c)))
-
-/* helper macro for converting from utf-32 le/be to utf-8 */
-#define CONVSTRFROMXE(str, len, strlen, factor, ret, totype, from, to, be) \
-	CONVSTR_(str, len, strlen, factor, ret, totype,                    \
-		 (from(&c, str, be)), (to(dest, &c)))
-
-/* helper macro for converting from utf-8 to utf-16/-32 le/be */
-#define CONVSTRNTOXE(str, len, strlen, factor, ret, totype, from, to, be) \
-	CONVSTR_(str, len, strlen, factor, ret, totype,                   \
-		 (from(&c, str, n)), (to(dest, &c, be)))
-
-int runetochar(char *str, Rune *rune)
+int runetochar(char *buf, Rune *rune)
 {
-	union utf8 u = {.pc = str};
+	union utf8 u = {.pc = buf};
 	unsigned char *ptr, lead_byte;
 	Rune c = *rune;
 	int n, retval;
@@ -185,72 +90,6 @@ int runetochar(char *str, Rune *rune)
 	}
 	*ptr = c | lead_byte;
 	return retval;
-}
-
-int runetowchar(wchar_t *str, Rune *rune)
-{
-	Rune c = *rune;
-
-	if (!validrune(c))
-		c = Runeerror;
-	if (sizeof(wchar_t) == 2)
-		RUNETOCHAR16(str, c);
-	else
-		RUNETOCHAR32(str, c);
-}
-
-int runetochar16(char16_t *str, Rune *rune)
-{
-	Rune c = *rune;
-
-	if (!validrune(c))
-		c = Runeerror;
-	RUNETOCHAR16(str, c);
-}
-
-int runetochar16xe(char16_t *str, Rune *rune, int be)
-{
-	union utf16 u = {.p = str};
-	Rune c = *rune, c1, c2;
-
-	if (!validrune(c))
-		c = Runeerror;
-	if (c <= 0xffff) {
-		*u.b++ = (be ? (c >> 8) : (c >> 0)) & 0xff;
-		*u.b = (be ? (c >> 0) : (c >> 8)) & 0xff;
-		return 1;
-	}
-	c -= 0x10000; /* remove 21th bit */
-	c1 = (((c >> 10) & 0x3ff) | 0xd800); /* high surrogate */
-	c2 = ((c & 0x3ff) | 0xdc00); /* low surrogate */
-	*u.b++ = (be ? (c1 >> 8) : (c1 >> 0)) & 0xff;
-	*u.b++ = (be ? (c1 >> 0) : (c1 >> 8)) & 0xff;
-	*u.b++ = (be ? (c2 >> 8) : (c2 >> 0)) & 0xff;
-	*u.b = (be ? (c2 >> 0) : (c2 >> 8)) & 0xff;
-	return 2;
-}
-
-int runetochar32(char32_t *str, Rune *rune)
-{
-	Rune c = *rune;
-
-	if (!validrune(c))
-		c = Runeerror;
-	RUNETOCHAR32(str, c);
-}
-
-int runetochar32xe(char32_t *str, Rune *rune, int be)
-{
-	union utf32 u = {.p = str};
-	Rune c = *rune;
-
-	if (!validrune(c))
-		c = Runeerror;
-	*u.b++ = (be ? (c >> 24) : (c >> 0)) & 0xff;
-	*u.b++ = (be ? (c >> 16) : (c >> 8)) & 0xff;
-	*u.b++ = (be ? (c >> 8) : (c >> 16)) & 0xff;
-	*u.b = (be ? (c >> 0) : (c >> 24)) & 0xff;
-	return 1;
 }
 
 int chartorune(Rune *rune, const char *str)
@@ -278,85 +117,15 @@ int chartorune(Rune *rune, const char *str)
 	return retval;
 }
 
-int wcharntorune(Rune *rune, const wchar_t *str, int n)
+int charntorune(Rune *rune, const char *str, size_t n)
 {
-	int retval = 1;
-	Rune c;
-
-	if (n <= 0)
+	*rune = Runeerror;
+	if (!n)
 		return 0;
-	if (sizeof(wchar_t) == 2) {
-		if (UTF16_IS_LEADING(*str) && n < 2)
-			return 0;
-		CHAR16TORUNE(c, str);
-	} else {
-		CHAR32TORUNE(c, str);
-	}
-	*rune = validrune(c) ? c : Runeerror;
-	return retval;
-}
-
-int char16ntorune(Rune *rune, const char16_t *str, int n)
-{
-	int retval = 1;
-	Rune c;
-
-	if (n <= 0 || (UTF16_IS_LEADING(*str) && n < 2))
-		return 0;
-	CHAR16TORUNE(c, str);
-	*rune = validrune(c) ? c : Runeerror;
-	return retval;
-}
-
-int char16nxetorune(Rune *rune, const char16_t *str, int n, int be)
-{
-	union utf16 u = {.cp = str};
-	char16_t tmp;
-	int retval = 1;
-	Rune c;
-
-	if (n <= 0)
-		return 0;
-	tmp = be ? (u.b[1] | u.b[0] << 8) :
-		   (u.b[0] | u.b[1] << 8);
-	if (UTF16_IS_LEADING(tmp) && n < 2)
-		return 0;
-	c = tmp;
-	u.p++;
-	if (UTF16_IS_LEADING(tmp)) {
-		tmp = be ? (u.b[1] | u.b[0] << 8) :
-			   (u.b[0] | u.b[1] << 8);
-		if (UTF16_IS_TRAILING((tmp))) {
-			c = (c & 0x3ff) << 10; /* high surrogate */
-			c |= (tmp & 0x3ff); /* low surrogate */
-			c += 0x10000; /* full 21-bit code point */
-			retval++;
-		} else {
-			c = Runeerror;
-		}
-	}
-	*rune = validrune(c) ? c : Runeerror;
-	return retval;
-}
-
-int char32torune(Rune *rune, const char32_t *str)
-{
-	int retval = 1;
-	Rune c;
-
-	CHAR32TORUNE(c, str);
-	*rune = validrune(c) ? c : Runeerror;
-	return retval;
-}
-
-int char32xetorune(Rune *rune, const char32_t *str, int be)
-{
-	union utf32 u = {.cp = str};
-	Rune c = be ? (u.b[3] | u.b[2] << 8 | u.b[1] << 16 | u.b[0] << 24) :
-		      (u.b[0] | u.b[1] << 8 | u.b[2] << 16 | u.b[3] << 24);
-
-	*rune = validrune(c) ? c : Runeerror;
-	return 1;
+	else if (!fullrune(str, n))
+		return 1;
+	else
+		return chartorune(rune, str);
 }
 
 int runelen(Rune rune)
@@ -375,7 +144,7 @@ int runenlen(Rune *rune, int n)
 	return retval;
 }
 
-int fullrune(const char *str, int n)
+int fullrune(const char *str, size_t n)
 {
 	int t = utf8_trail_cnt(*str);
 
@@ -384,7 +153,7 @@ int fullrune(const char *str, int n)
 	if (t < 0 || t >= UTFmax)
 		return 1;
 	else
-		return n >= t + 1;
+		return n >= (size_t)t + 1;
 }
 
 int validrune(Rune rune)
@@ -395,167 +164,13 @@ int validrune(Rune rune)
 		return 1;
 }
 
-char *runeindex(const char *str, Rune rune)
-{
-	union utf8 u = {.cp = str};
-	Rune c;
-
-	if (rune < Runeself)
-		return strchr(str, rune);
-	if (rune != Runeerror) {
-		char tmp[UTFmax + 1];
-		int n = runetochar(tmp, &rune);
-
-		tmp[n] = '\0';
-		return strstr(str, tmp);
-	}
-	do {
-		int n = chartorune(&c, u.pc);
-
-		if (c == rune)
-			return u.pc;
-		u.pc += n;
-	} while (c);
-	return NULL;
-}
-
-char *runerindex(const char *str, Rune rune)
-{
-	union utf8 u = {.cp = str};
-	char *save = NULL;
-	Rune c;
-
-	if (rune < Runeself)
-		return strrchr(str, rune);
-	do {
-		int n = chartorune(&c, u.pc);
-
-		if (c == rune)
-			save = u.pc;
-		u.pc += n;
-	} while (c);
-	return save;
-}
-
-int strtowcs(wchar_t **ret, const char *str, int len)
-{
-	/* worst-case: like `strtou16` and `strtou32` */
-	CONVSTRN(str, len, strlen, sizeof(wchar_t), ret, wchar_t,
-		 charntorune, runetowchar);
-}
-
-int strtou16(char16_t **ret, const char *str, int len)
-{
-	/* worst-case: 1x utf8-unit makes 1x utf16-unit */
-	CONVSTRN(str, len, strlen, sizeof(char16_t), ret, char16_t,
-		 charntorune, runetochar16);
-}
-
-int strtou16xe(char16_t **ret, const char *str, int len, int be)
-{
-	/* worst-case: like `strtou16` */
-	CONVSTRNTOXE(str, len, strlen, sizeof(char16_t), ret, char16_t,
-		     charntorune, runetochar16xe, be);
-}
-
-int strtou32(char32_t **ret, const char *str, int len)
-{
-	/* worst-case: 1x utf8-unit makes 1x utf32-unit */
-	CONVSTRN(str, len, strlen, sizeof(char32_t), ret, char32_t,
-		 charntorune, runetochar32);
-}
-
-int strtou32xe(char32_t **ret, const char *str, int len, int be)
-{
-	/* worst-case: like `strtou32` */
-	CONVSTRNTOXE(str, len, strlen, sizeof(char32_t), ret, char32_t,
-		     charntorune, runetochar32xe, be);
-}
-
-int wcstostr(char **ret, const wchar_t *str, int len)
-{
-	/* worst-case: like `u32tostr` */
-	CONVSTRN(str, len, wcslen, 4, ret, char,
-		 wcharntorune, runetochar);
-}
-
-int u16tostr(char **ret, const char16_t *str, int len)
-{
-	/* worst-case: 1x utf16-unit make 3x utf8-units */
-	CONVSTRN(str, len, str16len, 3, ret, char,
-		 char16ntorune, runetochar);
-}
-
-int u16xetostr(char **ret, const char16_t *str, int len, int be)
-{
-	/* worst-case: like `u16tostr` */
-	CONVSTRNFROMXE(str, len, str16len, 3, ret, char,
-		       char16nxetorune, runetochar, be);
-}
-
-int u32tostr(char **ret, const char32_t *str, int len)
-{
-	/* worst-case: 1x utf32-unit make 4x utf8-units */
-	CONVSTR(str, len, str32len, 4, ret, char,
-		char32torune, runetochar);
-}
-
-int u32xetostr(char **ret, const char32_t *str, int len, int be)
-{
-	/* worst-case: like `utf32tostr` */
-	CONVSTRFROMXE(str, len, str32len, 4, ret, char,
-		      char32xetorune, runetochar, be);
-}
-
-const char *validbom(const void *str, int len)
-{
-	const char *ptr = str;
-
-	if ((len >= 3 || len < 0) && !strncmp(ptr, BOM_UTF8, 3))
-		return BOM_UTF8;
-	else if ((len >= 2 || len < 0) && !strncmp(ptr, BOM_UTF16_BE, 2))
-		return BOM_UTF16_BE;
-	else if ((len >= 2 || len < 0) && !strncmp(ptr, BOM_UTF16_LE, 2))
-		return BOM_UTF16_LE;
-	else if ((len >= 4 || len < 0) && !strncmp(ptr, BOM_UTF32_BE, 4))
-		return BOM_UTF32_BE;
-	else if ((len >= 4 || len < 0) && !strncmp(ptr, BOM_UTF32_LE, 4))
-		return BOM_UTF32_LE;
-	else
-		return NULL;
-}
-
-int bomtostr(char **ret, const void *str, int len)
-{
-	union {
-		const char *cp;
-		const char16_t *cp16;
-		const char32_t *cp32;
-	} u = {.cp = str};
-	const char *bom = validbom(u.cp, len);
-
-	if (bom == BOM_UTF16_BE)
-		return u16betostr(ret, u.cp16 + 1, (len > 0) ? len / 2 : -1);
-	else if (bom == BOM_UTF16_LE)
-		return u16letostr(ret, u.cp16 + 1, (len > 0) ? len / 2 : -1);
-	else if (bom == BOM_UTF32_BE)
-		return u32betostr(ret, u.cp32 + 1, (len > 0) ? len / 4 : -1);
-	else if (bom == BOM_UTF32_LE)
-		return u32letostr(ret, u.cp32 + 1, (len > 0) ? len / 4 : -1);
-	else if (bom == BOM_UTF8)
-		u.cp += 3;
-	CONVSTRN(u.cp, len, strlen, 2, ret, char, charntorune, runetochar);
-}
-
 size_t utflen(const char *str)
 {
 	size_t len;
 	Rune rune;
-	int n;
 
-	for (len = 0; (n = chartorune(&rune, str)); str += n, len++)
-		if (!rune)
-			break;
+	for (len = 0; *str; len++)
+		str += chartorune(&rune, str);
 	return len;
 }
 
@@ -574,20 +189,487 @@ size_t utfnlen(const char *str, size_t maxlen)
 	return len;
 }
 
-size_t str16len(const char16_t *str)
+char *utfrune(const char *str, Rune rune)
 {
-	const char16_t *ptr;
+	union utf8 u = {.cp = str};
+	Rune c;
 
-	for (ptr = str; *ptr; ptr++)
-		/* do nothing */;
-	return ptr - str;
+	if (rune < Runeself)
+		return strchr(str, rune);
+	if (rune != Runeerror) {
+		char tmp[UTFmax + 1];
+		int n = runetochar(tmp, &rune);
+
+		tmp[n] = '\0';
+		return strstr(str, tmp);
+	}
+	do {
+		int n = chartorune(&c, u.cp);
+
+		if (c == rune)
+			return u.pc;
+		u.p += n;
+	} while (c);
+	return NULL;
 }
 
-size_t str32len(const char32_t *str)
+char *utfrrune(const char *str, Rune rune)
 {
-	const char32_t *ptr;
+	union utf8 u = {.cp = str};
+	char *save = NULL;
+	Rune c;
 
-	for (ptr = str; *ptr; ptr++)
-		/* do nothing */;
-	return ptr - str;
+	if (rune < Runeself)
+		return strrchr(str, rune);
+	do {
+		int n = chartorune(&c, u.cp);
+
+		if (c == rune)
+			save = u.pc;
+		u.p += n;
+	} while (c);
+	return save;
+}
+
+char *utfutf(const char *str, const char *substr)
+{
+	Rune c;
+	int n = chartorune(&c, substr);
+	union utf8 u;
+	size_t len;
+
+	if (c < Runeself)
+		return strstr(str, substr);
+	len = strlen(substr);
+	u.cp = str;
+	for (; (u.pc = utfrune(u.cp, c)); u.p += n) {
+		if (!strncmp(u.cp, substr, len))
+			return u.pc;
+	}
+	return NULL;
+}
+
+#define RUNETOCHAR16(buf, rune)                          \
+	do {                                             \
+		Rune c = *rune;                          \
+		if (!validrune(c))                       \
+			c = Runeerror;                   \
+		if (c <= 0xffff) {                       \
+			*buf = c;                        \
+			return 1;                        \
+		}                                        \
+		c -= 0x10000;                            \
+		*buf++ = (((c >> 10) & 0x3ff) | 0xd800); \
+		*buf = ((c & 0x3ff) | 0xdc00);           \
+		return 2;                                \
+	} while (0)
+
+int runetochar16(char16_t *buf, Rune *rune)
+{
+	RUNETOCHAR16(buf, rune);
+}
+
+int runetochar16xe(char16_t *buf, Rune *rune, int be)
+{
+	union utf16 u = {.p = buf};
+	Rune c = *rune, c1, c2;
+
+	if (!validrune(c))
+		c = Runeerror;
+	if (c <= 0xffff) {
+		*u.b++ = (be ? (c >> 8) : (c >> 0)) & 0xff;
+		*u.b = (be ? (c >> 0) : (c >> 8)) & 0xff;
+		return 1;
+	}
+	c -= 0x10000; /* remove 21th bit */
+	c1 = (((c >> 10) & 0x3ff) | 0xd800); /* high surrogate */
+	c2 = ((c & 0x3ff) | 0xdc00); /* low surrogate */
+	*u.b++ = (be ? (c1 >> 8) : (c1 >> 0)) & 0xff;
+	*u.b++ = (be ? (c1 >> 0) : (c1 >> 8)) & 0xff;
+	*u.b++ = (be ? (c2 >> 8) : (c2 >> 0)) & 0xff;
+	*u.b = (be ? (c2 >> 0) : (c2 >> 8)) & 0xff;
+	return 2;
+}
+
+#define RUNETOCHAR32(buf, rune)                      \
+	do {                                         \
+		Rune c = *rune;                      \
+		*buf = validrune(c) ? c : Runeerror; \
+		return 1;                            \
+	} while (0)
+
+int runetochar32(char32_t *buf, Rune *rune)
+{
+	RUNETOCHAR32(buf, rune);
+}
+
+int runetochar32xe(char32_t *buf, Rune *rune, int be)
+{
+	union utf32 u = {.p = buf};
+	Rune c = *rune;
+
+	if (!validrune(c))
+		c = Runeerror;
+	*u.b++ = (be ? (c >> 24) : (c >> 0)) & 0xff;
+	*u.b++ = (be ? (c >> 16) : (c >> 8)) & 0xff;
+	*u.b++ = (be ? (c >> 8) : (c >> 16)) & 0xff;
+	*u.b = (be ? (c >> 0) : (c >> 24)) & 0xff;
+	return 1;
+}
+
+int runetowchar(wchar_t *buf, Rune *rune)
+{
+	if (sizeof(wchar_t) == 2)
+		RUNETOCHAR16(buf, rune);
+	else
+		RUNETOCHAR32(buf, rune);
+}
+
+#define CHAR16TORUNE(rune, str, n)                             \
+	do {                                                   \
+		int retval;                                    \
+		Rune c;                                        \
+		char16_t tmp;                                  \
+		*rune = Runeerror;                             \
+		if (!n)                                        \
+			return 0;                              \
+		if (UTF16_IS_LEADING(*str) && n == 1)          \
+			return 1;                              \
+		retval = 1;                                    \
+		tmp = c = *str++;                              \
+		if (UTF16_IS_LEADING(tmp)) {                   \
+			if (UTF16_IS_TRAILING((tmp = *str))) { \
+				c = (c & 0x3ff) << 10;         \
+				c |= (tmp & 0x3ff);            \
+				c += 0x10000;                  \
+				retval++;                      \
+			} else {                               \
+				c = Runeerror;                 \
+			}                                      \
+		}                                              \
+		if (validrune(c))                              \
+			*rune = c;                             \
+		return retval;                                 \
+	} while (0)
+
+
+
+int char16ntorune(Rune *rune, const char16_t *str, size_t n)
+{
+	CHAR16TORUNE(rune, str, n);
+}
+
+int char16xentorune(Rune *rune, const char16_t *str, size_t n, int be)
+{
+	union utf16 u;
+	int retval;
+	Rune c;
+	char16_t tmp;
+
+	*rune = Runeerror;
+	if (!n)
+		return 0;
+	u.cp = str;
+	tmp = be ? (u.b[1] | u.b[0] << 8) :
+	           (u.b[0] | u.b[1] << 8);
+	if (UTF16_IS_LEADING(tmp) && n == 1)
+		return 1;
+	retval = 1;
+	c = tmp;
+	u.p++;
+	if (UTF16_IS_LEADING(tmp)) {
+		tmp = be ? (u.b[1] | u.b[0] << 8) :
+		           (u.b[0] | u.b[1] << 8);
+		if (UTF16_IS_TRAILING((tmp))) {
+			c = (c & 0x3ff) << 10; /* high surrogate */
+			c |= (tmp & 0x3ff); /* low surrogate */
+			c += 0x10000; /* full 21-bit code point */
+			retval++;
+		} else {
+			c = Runeerror;
+		}
+	}
+	if (validrune(c))
+		*rune = c;
+	return retval;
+}
+
+#define CHAR32TORUNE(rune, str, n) \
+	do {                       \
+		Rune c;            \
+		*rune = Runeerror; \
+		if (!n)            \
+			return 0;  \
+		c = *str;          \
+		if (validrune(c))  \
+			*rune = c; \
+		return 1;          \
+	} while (0)
+
+int char32ntorune(Rune *rune, const char32_t *str, size_t n)
+{
+	CHAR32TORUNE(rune, str, n);
+}
+
+int char32xentorune(Rune *rune, const char32_t *str, size_t n, int be)
+{
+	union utf32 u;
+	Rune c;
+
+	*rune = Runeerror;
+	if (!n)
+		return 0;
+	u.cp = str;
+	c = be ? (u.b[3] | u.b[2] << 8 | u.b[1] << 16 | u.b[0] << 24) :
+	         (u.b[0] | u.b[1] << 8 | u.b[2] << 16 | u.b[3] << 24);
+	if (validrune(c))
+		*rune = c;
+	return 1;
+}
+
+int wcharntorune(Rune *rune, const wchar_t *str, size_t n)
+{
+	if (sizeof(wchar_t) == 2) {
+		CHAR16TORUNE(rune, str, n);
+	} else {
+		CHAR32TORUNE(rune, str, n);
+	}
+}
+
+#define MAX(a, b) (((a) > (b)) ? (a) : (b))
+
+#define UTFCONV(fromtype, fromfunc, totype, tofunc, factor)               \
+	do {                                                              \
+		totype **ret = retv, *buf, *dest;                         \
+		const fromtype *str = strv, *ptr;                         \
+		Rune rune;                                                \
+		size_t i, n, len;                                         \
+		int w, retval;                                            \
+		for (ptr = str; *ptr; ptr++)                              \
+			/* do nothing */;                                 \
+		len = (size_t)((uintptr_t)ptr - (uintptr_t)str) /         \
+		      sizeof(*str) + 1;                                   \
+		*ret = buf = malloc(len * (factor) * sizeof(*buf));       \
+		if (!buf)                                                 \
+			return -1;                                        \
+		dest = buf;                                               \
+		for (i = 0, n = len; i < n; i += w) {                     \
+			w = fromfunc(&rune, str, len);                    \
+			dest += tofunc(dest, &rune);                      \
+			str += w;                                         \
+			len -= w;                                         \
+		}                                                         \
+		retval = dest - buf;                                      \
+		buf = realloc(buf, retval * sizeof(*buf));                \
+		if (buf)                                                  \
+			*ret = buf;                                       \
+		return retval - 1;                                        \
+	} while (0)
+
+int utfconv(void *retv, enum utfconv_type rettype, const void *strv,
+            enum utfconv_type strtype)
+{
+	if (strtype == UTFCONV_UTF8) {
+		if (rettype == UTFCONV_UTF8)
+			UTFCONV(char, charntorune, char, runetochar,
+			        runelen(Runeerror));
+		else if (rettype == UTFCONV_UTF16)
+			UTFCONV(char, charntorune, char16_t, runetochar16, 1);
+		else if (rettype == UTFCONV_UTF16LE)
+			UTFCONV(char, charntorune, char16_t, runetochar16le, 1);
+		else if (rettype == UTFCONV_UTF16BE)
+			UTFCONV(char, charntorune, char16_t, runetochar16be, 1);
+		else if (rettype == UTFCONV_UTF32)
+			UTFCONV(char, charntorune, char32_t, runetochar32, 1);
+		else if (rettype == UTFCONV_UTF32LE)
+			UTFCONV(char, charntorune, char32_t, runetochar32le, 1);
+		else if (rettype == UTFCONV_UTF32BE)
+			UTFCONV(char, charntorune, char32_t, runetochar32be, 1);
+		else if (rettype == UTFCONV_WCHAR)
+			UTFCONV(char, charntorune, wchar_t, runetowchar, 1);
+	} else if (strtype == UTFCONV_UTF16) {
+		if (rettype == UTFCONV_UTF8)
+			UTFCONV(char16_t, char16ntorune, char, runetochar,
+			        MAX(runelen(Runeerror), 3));
+		else if (rettype == UTFCONV_UTF16)
+			UTFCONV(char16_t, char16ntorune, char16_t, runetochar16,
+			        (Runeerror < 0x10000) ? 1 : 2);
+		else if (rettype == UTFCONV_UTF16LE)
+			UTFCONV(char16_t, char16ntorune, char16_t,
+			        runetochar16le, (Runeerror < 0x10000) ? 1 : 2);
+		else if (rettype == UTFCONV_UTF16BE)
+			UTFCONV(char16_t, char16ntorune, char16_t,
+			        runetochar16be, (Runeerror < 0x10000) ? 1 : 2);
+		else if (rettype == UTFCONV_UTF32)
+			UTFCONV(char16_t, char16ntorune, char32_t, runetochar32,
+			        1);
+		else if (rettype == UTFCONV_UTF32LE)
+			UTFCONV(char16_t, char16ntorune, char32_t,
+			        runetochar32le, 1);
+		else if (rettype == UTFCONV_UTF32BE)
+			UTFCONV(char16_t, char16ntorune, char32_t,
+			        runetochar32be, 1);
+		else if (rettype == UTFCONV_WCHAR)
+			UTFCONV(char16_t, char16ntorune, wchar_t, runetowchar,
+			        (sizeof(wchar_t) == 2) ? (Runeerror < 0x10000) ?
+			                                 1 : 2 : 1);
+	} else if (strtype == UTFCONV_UTF16LE) {
+		if (rettype == UTFCONV_UTF8)
+			UTFCONV(char16_t, char16lentorune, char, runetochar,
+			        MAX(runelen(Runeerror), 3));
+		else if (rettype == UTFCONV_UTF16)
+			UTFCONV(char16_t, char16lentorune, char16_t,
+			        runetochar16, (Runeerror < 0x10000) ? 1 : 2);
+		else if (rettype == UTFCONV_UTF16LE)
+			UTFCONV(char16_t, char16lentorune, char16_t,
+			        runetochar16le, (Runeerror < 0x10000) ? 1 : 2);
+		else if (rettype == UTFCONV_UTF16BE)
+			UTFCONV(char16_t, char16lentorune, char16_t,
+			        runetochar16be, (Runeerror < 0x10000) ? 1 : 2);
+		else if (rettype == UTFCONV_UTF32)
+			UTFCONV(char16_t, char16lentorune, char32_t,
+			        runetochar32, 1);
+		else if (rettype == UTFCONV_UTF32LE)
+			UTFCONV(char16_t, char16lentorune, char32_t,
+			        runetochar32le, 1);
+		else if (rettype == UTFCONV_UTF32BE)
+			UTFCONV(char16_t, char16lentorune, char32_t,
+			        runetochar32be, 1);
+		else if (rettype == UTFCONV_WCHAR)
+			UTFCONV(char16_t, char16lentorune, wchar_t, runetowchar,
+			        (sizeof(wchar_t) == 2) ? (Runeerror < 0x10000) ?
+			                                 1 : 2 : 1);
+	} else if (strtype == UTFCONV_UTF16BE) {
+		if (rettype == UTFCONV_UTF8)
+			UTFCONV(char16_t, char16bentorune, char, runetochar,
+			        MAX(runelen(Runeerror), 3));
+		else if (rettype == UTFCONV_UTF16)
+			UTFCONV(char16_t, char16bentorune, char16_t,
+			        runetochar16, (Runeerror < 0x10000) ? 1 : 2);
+		else if (rettype == UTFCONV_UTF16LE)
+			UTFCONV(char16_t, char16bentorune, char16_t,
+			        runetochar16le, (Runeerror < 0x10000) ? 1 : 2);
+		else if (rettype == UTFCONV_UTF16BE)
+			UTFCONV(char16_t, char16bentorune, char16_t,
+			        runetochar16be, (Runeerror < 0x10000) ? 1 : 2);
+		else if (rettype == UTFCONV_UTF32)
+			UTFCONV(char16_t, char16bentorune, char32_t,
+			        runetochar32, 1);
+		else if (rettype == UTFCONV_UTF32LE)
+			UTFCONV(char16_t, char16bentorune, char32_t,
+			        runetochar32le, 1);
+		else if (rettype == UTFCONV_UTF32BE)
+			UTFCONV(char16_t, char16bentorune, char32_t,
+			        runetochar32be, 1);
+		else if (rettype == UTFCONV_WCHAR)
+			UTFCONV(char16_t, char16bentorune, wchar_t, runetowchar,
+			        (sizeof(wchar_t) == 2) ? (Runeerror < 0x10000) ?
+			                                 1 : 2 : 1);
+	} else if (strtype == UTFCONV_UTF32) {
+		if (rettype == UTFCONV_UTF8)
+			UTFCONV(char32_t, char32ntorune, char, runetochar,
+			        UTFmax);
+		else if (rettype == UTFCONV_UTF16)
+			UTFCONV(char32_t, char32ntorune, char16_t, runetochar16,
+			        2);
+		else if (rettype == UTFCONV_UTF16LE)
+			UTFCONV(char32_t, char32ntorune, char16_t,
+			        runetochar16le, 2);
+		else if (rettype == UTFCONV_UTF16BE)
+			UTFCONV(char32_t, char32ntorune, char16_t,
+			        runetochar16be, 2);
+		else if (rettype == UTFCONV_UTF32)
+			UTFCONV(char32_t, char32ntorune, char32_t,
+			        runetochar32, 1);
+		else if (rettype == UTFCONV_UTF32LE)
+			UTFCONV(char32_t, char32ntorune, char32_t,
+			        runetochar32le, 1);
+		else if (rettype == UTFCONV_UTF32BE)
+			UTFCONV(char32_t, char32ntorune, char32_t,
+			        runetochar32be, 1);
+		else if (rettype == UTFCONV_WCHAR)
+			UTFCONV(char32_t, char32ntorune, wchar_t, runetowchar,
+			        (sizeof(wchar_t) == 2) ? 2 : 1);
+	} else if (strtype == UTFCONV_UTF32LE) {
+		if (rettype == UTFCONV_UTF8)
+			UTFCONV(char32_t, char32lentorune, char, runetochar,
+			        UTFmax);
+		else if (rettype == UTFCONV_UTF16)
+			UTFCONV(char32_t, char32lentorune, char16_t,
+			        runetochar16, 2);
+		else if (rettype == UTFCONV_UTF16LE)
+			UTFCONV(char32_t, char32lentorune, char16_t,
+			        runetochar16le, 2);
+		else if (rettype == UTFCONV_UTF16BE)
+			UTFCONV(char32_t, char32lentorune, char16_t,
+			        runetochar16be, 2);
+		else if (rettype == UTFCONV_UTF32)
+			UTFCONV(char32_t, char32lentorune, char32_t,
+			        runetochar32, 1);
+		else if (rettype == UTFCONV_UTF32LE)
+			UTFCONV(char32_t, char32lentorune, char32_t,
+			        runetochar32le, 1);
+		else if (rettype == UTFCONV_UTF32BE)
+			UTFCONV(char32_t, char32lentorune, char32_t,
+			        runetochar32be, 1);
+		else if (rettype == UTFCONV_WCHAR)
+			UTFCONV(char32_t, char32lentorune, wchar_t, runetowchar,
+			        (sizeof(wchar_t) == 2) ? 2 : 1);
+	} else if (strtype == UTFCONV_UTF32BE) {
+		if (rettype == UTFCONV_UTF8)
+			UTFCONV(char32_t, char32bentorune, char, runetochar,
+			        UTFmax);
+		else if (rettype == UTFCONV_UTF16)
+			UTFCONV(char32_t, char32bentorune, char16_t,
+			        runetochar16, 2);
+		else if (rettype == UTFCONV_UTF16LE)
+			UTFCONV(char32_t, char32bentorune, char16_t,
+			        runetochar16le, 2);
+		else if (rettype == UTFCONV_UTF16BE)
+			UTFCONV(char32_t, char32bentorune, char16_t,
+			        runetochar16be, 2);
+		else if (rettype == UTFCONV_UTF32)
+			UTFCONV(char32_t, char32bentorune, char32_t,
+			        runetochar32, 1);
+		else if (rettype == UTFCONV_UTF32LE)
+			UTFCONV(char32_t, char32bentorune, char32_t,
+			        runetochar32le, 1);
+		else if (rettype == UTFCONV_UTF32BE)
+			UTFCONV(char32_t, char32bentorune, char32_t,
+			        runetochar32be, 1);
+		else if (rettype == UTFCONV_WCHAR)
+			UTFCONV(char32_t, char32bentorune, wchar_t, runetowchar,
+			        (sizeof(wchar_t) == 2) ? 2 : 1);
+	} else if (strtype == UTFCONV_WCHAR) {
+		if (rettype == UTFCONV_UTF8)
+			UTFCONV(wchar_t, wcharntorune, char, runetochar,
+			        (sizeof(wchar_t) == 2) ? MAX(runelen(Runeerror),
+			                                     3) : UTFmax);
+		else if (rettype == UTFCONV_UTF16)
+			UTFCONV(wchar_t, wcharntorune, char16_t, runetochar16,
+			        (sizeof(wchar_t) == 2) ? (Runeerror < 0x10000) ?
+			                                 1 : 2 : 2);
+		else if (rettype == UTFCONV_UTF16LE)
+			UTFCONV(wchar_t, wcharntorune, char16_t, runetochar16le,
+			        (sizeof(wchar_t) == 2) ? (Runeerror < 0x10000) ?
+			                                 1 : 2 : 2);
+		else if (rettype == UTFCONV_UTF16BE)
+			UTFCONV(wchar_t, wcharntorune, char16_t, runetochar16be,
+			        (sizeof(wchar_t) == 2) ? (Runeerror < 0x10000) ?
+			                                 1 : 2 : 2);
+		else if (rettype == UTFCONV_UTF32)
+			UTFCONV(wchar_t, wcharntorune, char32_t, runetochar32,
+			        1);
+		else if (rettype == UTFCONV_UTF32LE)
+			UTFCONV(wchar_t, wcharntorune, char32_t, runetochar32le,
+			        1);
+		else if (rettype == UTFCONV_UTF32BE)
+			UTFCONV(wchar_t, wcharntorune, char32_t, runetochar32be,
+			        1);
+		else if (rettype == UTFCONV_WCHAR)
+			UTFCONV(wchar_t, wcharntorune, wchar_t, runetowchar,
+			        (sizeof(wchar_t) == 2) ? (Runeerror < 0x10000) ?
+			                                 1 : 2 : 1);
+	}
+	return -1;
 }

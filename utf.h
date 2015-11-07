@@ -1,6 +1,7 @@
 #ifndef UTF_H
 #define UTF_H
 
+#include <stddef.h>
 #include <stdint.h>
 
 #ifndef __STD_UTF_16__
@@ -21,216 +22,372 @@ extern Rune Runeerror; /* decoding error in UTF, can be modified */
 static const Rune Runemax = 0x10ffff; /* 21-bit rune */
 static const Rune Runemask = 0x1fffff; /* bits used by runes */
 
-extern const char *const BOM_UTF8;
-extern const char *const BOM_UTF16_BE;
-extern const char *const BOM_UTF16_LE;
-extern const char *const BOM_UTF32_BE;
-extern const char *const BOM_UTF32_LE;
+/* possible encodings for utfconv() */
+enum utfconv_type {
+	UTFCONV_UTF8,
+	UTFCONV_UTF16,
+	UTFCONV_UTF16LE,
+	UTFCONV_UTF16BE,
+	UTFCONV_UTF32,
+	UTFCONV_UTF32LE,
+	UTFCONV_UTF32BE,
+	UTFCONV_WCHAR
+};
 
 /* forward declarations */
-int runetochar16xe(char16_t *str, Rune *rune, int be);
-int runetochar32xe(char32_t *str, Rune *rune, int be);
-int char16nxetorune(Rune *rune, const char16_t *str, int n, int be);
-int char32xetorune(Rune *rune, const char32_t *str, int be);
-int strtou16xe(char16_t **ret, const char *str, int len, int be);
-int strtou32xe(char32_t **ret, const char *str, int len, int be);
-int u16xetostr(char **ret, const char16_t *str, int len, int be);
-int u32xetostr(char **ret, const char32_t *str, int len, int be);
+int runetochar16xe(char16_t *buf, Rune *rune, int be);
+int runetochar32xe(char32_t *buf, Rune *rune, int be);
+int char16xentorune(Rune *rune, const char16_t *str, size_t n, int be);
+int char32xentorune(Rune *rune, const char32_t *str, size_t n, int be);
 
 /**
- * runetochar() - write rune to utf-8 buffer
- * @str: pointer to a buffer >= UTFmax in size
- * @rune: pointer to a rune
+ * loop_runes() - macro to loop through a utf-8 string's runes
+ * @i: size_t variable holding the loop counter
+ * @rune: Rune variable holding the actual decoded rune
+ * @str: pointer to the string
+ * @n: size of the string
+ * @body: loop body that should be wrapped in {}
+ */
+#define loop_runes(i, rune, str, n, body)                                    \
+	{                                                                    \
+		const char *_ptr = (str);                                    \
+		size_t _j, _n, _len = (n);                                   \
+		Rune *_rune = &(rune);                                       \
+		int _w;                                                      \
+		for (_j = 0, _n = _len, (i) = 0; _j < _n; _j += _w, (i)++) { \
+			_w = charntorune(_rune, _ptr, _len);                 \
+			body                                                 \
+			_ptr += _w;                                          \
+			_len -= _w;                                          \
+		}                                                            \
+	}
+
+/**
+ * runetochar() - write a rune to a buffer
+ * @buf: pointer to the buffer >= UTFmax in size
+ * @rune: pointer to the rune
  *
  * If @rune is invalid, Runeerror gets written.
  *
  * Return: The number of bytes written.
  */
-int runetochar(char *str, Rune *rune);
-
-/* like runetochar16() or runetochar32() */
-int runetowchar(wchar_t *str, Rune *rune);
-
-/* like runetochar(), but emits utf-16 */
-int runetochar16(char16_t *str, Rune *rune);
-#define runetochar16be(str, rune) runetochar16xe((str), (rune), 1)
-#define runetochar16le(str, rune) runetochar16xe((str), (rune), 0)
-
-/* like runetochar(), but emits utf-32 */
-int runetochar32(char32_t *str, Rune *rune);
-#define runetochar32be(str, rune) runetochar32xe((str), (rune), 1)
-#define runetochar32le(str, rune) runetochar32xe((str), (rune), 0)
+int runetochar(char *buf, Rune *rune);
 
 /**
- * chartorune() - read rune from utf-8 buffer
+ * chartorune() - read a rune from a utf-8 string
  * @rune: pointer that receives the rune
- * @str: pointer to a buffer >= UTFmax in size
+ * @str: pointer to the string >= UTFmax in size
  *
- * If the rune at @str is invalid, @rune gets
- * set to Runeerror and 1 is returned.
+ * If the rune at @str is invalid, @rune gets set to Runeerror and 1 is
+ * returned.
  *
- * Return: The number of bytes read.
+ * Return: The number of bytes consumed.
+ *
+ * Note!: If @str is smaller than UTFmax, a buffer over-read might happen.
  */
 int chartorune(Rune *rune, const char *str);
 
 /**
- * charntorune() - read rune from utf-8 buffer
+ * charntorune() - read a rune from a fixed-size utf-8 string
  * @rune: pointer that receives the rune
- * @str: pointer to a buffer
- * @n: buffer size of the buffer
+ * @str: pointer to the string
+ * @n: size of the string
  *
- * While chartorune() may read up to UTFmax bytes at any
- * time, charntorune() won't read more than @n bytes.
+ * Unlike chartorune(), this won't access more than @n bytes of @str. So If
+ * there is no full rune within those bytes, @rune gets set to Runeerror and 1
+ * is returned. If @n is 0 and not a single byte can be accessed, @rune again
+ * gets set to Runeerror, but 0 is returned.
  *
- * Return: The number of bytes read.
+ * Return: The number of bytes consumed.
  */
-#define charntorune(rune, str, n) \
-	(fullrune((str), (n)) ? chartorune((rune), (str)) : 0)
-
-/* like char16torune() or char32torune() */
-#define wchartorune(rune, str) wcharntorune((rune), (str), INT_MAX)
-
-/* like char16ntorune() or char32ntorune() */
-int wcharntorune(Rune *rune, const wchar_t *str, int n);
-
-/* like chartorune(), but reads utf-16 */
-#define char16torune(rune, str) char16ntorune((rune), (str), INT_MAX)
-
-/* like charntorune(), but reads utf-16 */
-int char16ntorune(Rune *rune, const char16_t *str, int n);
-#define char16betorune(rune, str) char16xentorune((rune), (str), INT_MAX, 1)
-#define char16nbetorune(rune, str, n) char16xentorune((rune), (str), (n), 1)
-#define char16letorune(rune, str) char16xentorune((rune), (str), INT_MAX, 0)
-#define char16nletorune(rune, str, n) char16xentorune((rune), (str), (n), 0)
-
-/* like chartorune(), but reads utf-32 */
-int char32torune(Rune *rune, const char32_t *str);
-#define char32betorune(rune, str) char32xetorune((rune), (str), 1)
-#define char32letorune(rune, str) char32xetorune((rune), (str), 0)
+int charntorune(Rune *rune, const char *str, size_t n);
 
 /**
- * runelen() - return rune size in chars
+ * runelen() - return the size of a rune in chars
  * @rune: rune to be analyzed
  *
- * Return: The number of bytes needed to convert @rune to utf-8.
+ * Return: The number of bytes needed to convert the rune to utf-8.
  */
 int runelen(Rune rune);
 
 /**
- * runenlen() - return size of runes in chars
- * @rune: pointer to runes
+ * runenlen() - return the size of given runes in chars
+ * @rune: pointer to the runes
  * @n: number of runes
  *
- * Return: The number of bytes needed to convert the @n runes to utf-8.
+ * Return: The number of bytes needed to convert the runes to utf-8.
  */
 int runenlen(Rune *rune, int n);
+
+/**
+ * fullrune() - check if a string is long enough to be decoded by chartorune()
+ * @str: pointer to the string
+ * @n: size of the string
+ *
+ * This does not guarantee that @str contains legal utf-8 encoding, but
+ * indicates that chartorune() can be used safely to read a rune from @str.
+ * Invalid encoding is considered a full rune if @n > 0, since chartorune()
+ * would read Runeerror and consume only 1 byte.
+ *
+ * Return: When it's safe to call chartorune() on @str 1, otherwise 0.
+ */
+int fullrune(const char *str, size_t n);
 
 /**
  * validrune() - check if a rune is valid
  * @rune: rune to be analyzed
  *
- * Return: When @rune is valid 1, otherwise 0.
+ * Return: When the rune is valid 1, otherwise 0.
  */
 int validrune(Rune rune);
 
 /**
- * fullrune() - check if a buffer is big enough for a rune
- * @str: pointer to a buffer
- * @n: size of the buffer
- *
- * This does not guarantee that @str contains legal utf-8
- * encoding, but tells you that a full rune has arrived.
- *
- * Return: When @str is big enough to contain a full rune.
- */
-int fullrune(const char *str, int n);
-
-/**
- * runeindex() - search a rune in a buffer
- * @str: pointer to a buffer
- * @rune: rune to search
- *
- * If @rune is Runeerror, the first invalid
- * rune is returned, if any.
- *
- * Return: Pointer to the encoded rune in @str, or NULL.
- */
-char *runeindex(const char *str, Rune rune);
-
-/**
- * runerindex() - search a rune in a buffer from right-to-left
- * @str: pointer to a buffer
- * @rune: rune to search
- *
- * Return: Pointer to the encoded rune in @str, or NULL.
- */
-char *runerindex(const char *str, Rune rune);
-
-/* like bomtostr(), `len` is the length of `str` in code units */
-int strtowcs(wchar_t **ret, const char *str, int len);
-int strtou16(char16_t **ret, const char *str, int len);
-#define strtou16be(ret, str, len) strtou16xe((ret), (str), (len), 1)
-#define strtou16le(ret, str, len) strtou16xe((ret), (str), (len), 0)
-int strtou32(char32_t **ret, const char *str, int len);
-#define strtou32be(ret, str, len) strtou32xe((ret), (str), (len), 1)
-#define strtou32le(ret, str, len) strtou32xe((ret), (str), (len), 0)
-int wcstostr(char **ret, const wchar_t *str, int len);
-int u16tostr(char **ret, const char16_t *str, int len);
-#define u16betostr(ret, str, len) u16xetostr((ret), (str), (len), 1)
-#define u16letostr(ret, str, len) u16xetostr((ret), (str), (len), 0)
-int u32tostr(char **ret, const char32_t *str, int len);
-#define u32betostr(ret, str, len) u32xetostr((ret), (str), (len), 1)
-#define u32letostr(ret, str, len) u32xetostr((ret), (str), (len), 0)
-
-/**
- * validbom() - check for a valid bom
- * @str: pointer to a buffer
- * @len: size of the buffer in bytes
- *
- * Return: Pointer to the found bom, or NULL if none was found.
- */
-const char *validbom(const void *str, int len);
-
-/**
- * bomtostr() - convert a string to utf-8
- * @ret: pointer to a pointer receiving the allocated result
- * @str: pointer to an utf-8/-16/-32 string
- * @len: size of the string in bytes
- *
- * If @len is -1, @str is assumed to be null-terminated.
- * If no bom was found, utf-8 is assumed.
- *
- * Return: Length of the result in code units, or -1 if malloc() failed.
- */
-int bomtostr(char **ret, const void *str, int len);
-
-/**
- * utflen() - get string length in code points
- * @str: pointer to an utf-8 string
- *
- * This might read beyond @str's end, if e.g. the
- * very last byte indicates a 3-byte sequence.
+ * utflen() - return a utf-8 string's length in code points
+ * @str: pointer to the null-terminated string
  *
  * Return: Length of @str in code points.
  */
 size_t utflen(const char *str);
 
 /**
- * utfnlen() - get string length in code points
- * @str: pointer to an utf-8 string
- * @maxlen: size of the buffer
+ * utfnlen() - return a fixed-size utf-8 string's length in code points
+ * @str: pointer to the string
+ * @maxlen: size of the string
  *
- * This returns the number of code points in @str,
- * without reading beyond the buffer's end.
+ * Like utflen(), but with respect to a buffer's size.
  *
  * Return: Length of @str in code points.
  */
 size_t utfnlen(const char *str, size_t maxlen);
 
-/* like strlen(), but for `char16_t` */
-size_t str16len(const char16_t *str);
+/**
+ * utfrune() - get the first occurrence of a rune in a utf-8 string
+ * @str: pointer to the null-terminated string
+ * @rune: rune to look for
+ *
+ * If @rune is Runeerror, the first invalid rune is returned, if any.
+ *
+ * Return: Pointer to the encoded rune in @str, or NULL.
+ */
+char *utfrune(const char *str, Rune rune);
 
-/* like strlen(), but for `char32_t` */
-size_t str32len(const char32_t *str);
+/**
+ * utfrrune() - get the last occurrence of a rune in a utf-8 string
+ * @str: pointer to the null-terminated string
+ * @rune: rune to look for
+ *
+ * If @rune is Runeerror, the first invalid rune is returned, if any.
+ *
+ * Return: Pointer to the encoded rune in @str, or NULL.
+ */
+char *utfrrune(const char *str, Rune rune);
+
+/**
+ * utfutf() - get the first occurrence of a utf-8 string in a utf-8 string
+ * @str: pointer to the null-terminated string to examine
+ * @substr: pointer to the null-terminated string to look for
+ *
+ * Return: Pointer to the found substring in @str, or NULL.
+ */
+char *utfutf(const char *str, const char *substr);
+
+/**
+ * utfvalid() - check if a utf-8 string is free of invalid encodings
+ * @str: pointer to the null-terminated string
+ *
+ * Return: When there is neither an invalid encoding nor Runeerror in @str 1,
+ *	otherwise 0.
+ */
+#define utfvalid(str) (!utfrune((str), Runeerror))
+
+/**
+ * runetochar16() - write a rune to a char16_t-buffer
+ * @buf: pointer to the buffer >= 2 in size
+ * @rune: pointer to the rune
+ *
+ * The rune is written to @buf in utf-16, so either one or two char16_t are
+ * needed per code point. If it's invalid, Runeerror gets written.
+ *
+ * Return: The number of char16_t written.
+ */
+int runetochar16(char16_t *buf, Rune *rune);
+
+/**
+ * runetochar16le() - write a rune to a little-endian char16_t-buffer
+ * @buf: pointer to the buffer >= 2 in size
+ * @rune: pointer to the rune
+ *
+ * Same as runetochar16().
+ *
+ * Return: The number of char16_t written.
+ */
+#define runetochar16le(buf, rune) runetochar16xe((buf), (rune), 0)
+
+/**
+ * runetochar16be() - write a rune to a big-endian char16_t-buffer
+ * @buf: pointer to the buffer >= 2 in size
+ * @rune: pointer to the rune
+ *
+ * Same as runetochar16().
+ *
+ * Return: The number of char16_t written.
+ */
+#define runetochar16be(buf, rune) runetochar16xe((buf), (rune), 1)
+
+/**
+ * runetochar32() - write a rune to a char32_t-buffer
+ * @buf: pointer to the buffer >= 1 in size
+ * @rune: pointer to the rune
+ *
+ * The rune is written to @buf in utf-32, so exactly one char32_t is needed per
+ * code point. If it's invalid, Runeerror gets written.
+ *
+ * Return: 1 as one char32_t gets written.
+ */
+int runetochar32(char32_t *buf, Rune *rune);
+
+/**
+ * runetochar32le() - write a rune to a little-endian char32_t-buffer
+ * @buf: pointer to the buffer >= 1 in size
+ * @rune: pointer to the rune
+ *
+ * Same as runetochar32().
+ *
+ * Return: 1 as one char32_t gets written.
+ */
+#define runetochar32le(buf, rune) runetochar32xe((buf), (rune), 0)
+
+/**
+ * runetochar32be() - write a rune to a big-endian char32_t-buffer
+ * @buf: pointer to the buffer >= 1 in size
+ * @rune: pointer to the rune
+ *
+ * Same as runetochar32().
+ *
+ * Return: 1 as one char32_t gets written.
+ */
+#define runetochar32be(buf, rune) runetochar32xe((buf), (rune), 1)
+
+/**
+ * runetowchar() - write a rune to a wchar_t-buffer
+ * @buf: pointer to the buffer
+ * @rune: pointer to the rune
+ *
+ * This equals to either runetochar16 or runetochar32, depending on
+ * `sizeof(wchar_t)`.
+ *
+ * Return: The number of wchar_t written.
+ */
+int runetowchar(wchar_t *buf, Rune *rune);
+
+/**
+ * char16ntorune() - read a rune from a fixed-size utf-16 string
+ * @rune: pointer that receives the rune
+ * @str: pointer to the string
+ * @n: size of the string
+ *
+ * This won't access more than @n char16_t of @str. If there is no full or an
+ * invalid rune within those char16_t, @rune gets set to Runeerror and 1 is
+ * returned. If @n is 0 and not a single char16_t can be accessed, @rune again
+ * gets set to Runeerror, but 0 is returned.
+ *
+ * Return: The number of char16_t consumed.
+ */
+int char16ntorune(Rune *rune, const char16_t *str, size_t n);
+
+/**
+ * char16lentorune() - read a rune from a fixed-size little-endian utf-16 string
+ * @rune: pointer that receives the rune
+ * @str: pointer to the string
+ * @n: size of the string
+ *
+ * Same as char16ntorune().
+ *
+ * Return: The number of char16_t consumed.
+ */
+#define char16lentorune(rune, str, n) char16xentorune((rune), (str), (n), 0)
+
+ /**
+ * char16bentorune() - read a rune from a fixed-size big-endian utf-16 string
+ * @rune: pointer that receives the rune
+ * @str: pointer to the string
+ * @n: size of the string
+ *
+ * Same as char16ntorune().
+ *
+ * Return: The number of char16_t consumed.
+ */
+#define char16bentorune(rune, str, n) char16xentorune((rune), (str), (n), 1)
+
+/**
+ * char32ntorune() - read a rune from a fixed-size utf-32 string
+ * @rune: pointer that receives the rune
+ * @str: pointer to the string
+ * @n: size of the string
+ *
+ * This won't access more than @n char32_t of @str. If an invalid rune is read,
+ * @rune gets set to Runeerror and 1 is returned. If @n is 0 and not a single
+ * char32_t can be accessed, @rune again gets set to Runeerror, but 0 is
+ * returned.
+ *
+ * Return: The number of char32_t consumed.
+ */
+int char32ntorune(Rune *rune, const char32_t *str, size_t n);
+
+/**
+ * char32lentorune() - read a rune from a fixed-size little-endian utf-32 string
+ * @rune: pointer that receives the rune
+ * @str: pointer to the string
+ * @n: size of the string
+ *
+ * Same as char32ntorune().
+ *
+ * Return: The number of char32_t consumed.
+ */
+#define char32lentorune(rune, str, n) char32xentorune((rune), (str), (n), 0)
+
+ /**
+ * char32bentorune() - read a rune from a fixed-size big-endian utf-32 string
+ * @rune: pointer that receives the rune
+ * @str: pointer to the string
+ * @n: size of the string
+ *
+ * Same as char32ntorune().
+ *
+ * Return: The number of char32_t consumed.
+ */
+#define char32bentorune(rune, str, n) char32xentorune((rune), (str), (n), 1)
+
+/**
+ * wcharntorune() - read a rune from a fixed-size wchar_t string
+ * @rune: pointer that receives the rune
+ * @str: pointer to the string
+ * @n: size of the string
+ *
+ * This equals to either char16ntorune or char32ntorune, depending on
+ * `sizeof(wchar_t)`.
+ *
+ * Return: The number of wchar_t consumed.
+ */
+int wcharntorune(Rune *rune, const wchar_t *str, size_t n);
+
+/**
+ * utfconv() - convert a string to another utf encoding
+ * @retv: pointer receiving a pointer to the new string
+ * @rettype: encoding the new string should be created in
+ * @strv: pointer to the null-terminated source string
+ * @strtype: encoding the source string is in
+ *
+ * The pointers should match the types, so if @rettype is UTFCONV_UTF32 @retv
+ * should be a pointer to `char32_t *`. If @strtype is UTFCONV_UTF8 @strv should
+ * be a `char *`. UTFCONV_WCHAR uses `wchar_t *` and results in either utf-16 or
+ * utf-32, depending on `sizeof(wchar_t)`.
+ *
+ * Return: When successful the number of code units @retv contains, otherwise -1
+ *	with `*@retv == NULL` if malloc() failed. You have to free() *@retv,
+ *	when you no longer need it.
+ */
+int utfconv(void *retv, enum utfconv_type rettype, const void *strv,
+            enum utfconv_type strtype);
 
 #endif /* UTF_H */
