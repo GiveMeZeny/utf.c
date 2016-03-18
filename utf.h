@@ -2,7 +2,7 @@
 #define UTF_H
 
 #include <stddef.h>
-#include <stdint.h>
+#include <inttypes.h>
 
 #ifndef __STD_UTF_16__
 typedef uint_least16_t char16_t;
@@ -11,6 +11,8 @@ typedef uint_least16_t char16_t;
 typedef uint_least32_t char32_t;
 #endif
 typedef uint32_t Rune;
+
+#define PRIRune "04"PRIX32
 
 enum {
 	UTFmax = 4 /* maximum bytes per rune */
@@ -46,21 +48,21 @@ int char32xentorune(Rune *rune, const char32_t *str, size_t n, int be);
  * @rune: Rune variable holding the actual decoded rune
  * @str: pointer to the string
  * @n: size of the string
- * @body: loop body that should be wrapped in {}
+ * @...: loop body that should be wrapped in {}
  */
-#define loop_runes(i, rune, str, n, body)                                    \
-	{                                                                    \
+#define loop_runes(i, rune, str, n, ...)                                     \
+	do {                                                                 \
 		const char *_ptr = (str);                                    \
 		size_t _j, _n, _len = (n);                                   \
 		Rune *_rune = &(rune);                                       \
 		int _w;                                                      \
 		for (_j = 0, _n = _len, (i) = 0; _j < _n; _j += _w, (i)++) { \
 			_w = charntorune(_rune, _ptr, _len);                 \
-			body                                                 \
+			__VA_ARGS__;                                         \
 			_ptr += _w;                                          \
 			_len -= _w;                                          \
 		}                                                            \
-	}
+	} while (0)
 
 /**
  * runetochar() - write a rune to a buffer
@@ -83,7 +85,8 @@ int runetochar(char *buf, Rune *rune);
  *
  * Return: The number of bytes consumed.
  *
- * Note!: If @str is smaller than UTFmax, a buffer over-read might happen.
+ * Note!: If @str is smaller than UTFmax, a buffer over-read might happen,
+ *	see charntorune().
  */
 int chartorune(Rune *rune, const char *str);
 
@@ -126,8 +129,8 @@ int runenlen(Rune *rune, int n);
  *
  * This does not guarantee that @str contains legal utf-8 encoding, but
  * indicates that chartorune() can be used safely to read a rune from @str.
- * Invalid encoding is considered a full rune if @n > 0, since chartorune()
- * would read Runeerror and consume only 1 byte.
+ * An invalid leading byte is considered a full rune if @n > 0, since
+ * chartorune() would read Runeerror and consume only 1 byte.
  *
  * Return: When it's safe to call chartorune() on @str 1, otherwise 0.
  */
